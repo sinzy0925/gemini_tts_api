@@ -1,23 +1,13 @@
-緊張感のある thriller風で、静かな導入から徐々に
-panic を高め、英語と中国語を断片的に差し込みなが
-ら、場面描写を鮮明にする:[serious]最初に違和感が
-あったのは、音でした。いつもなら深夜でも遠くで聞
-こえる車の気配が、その夜だけは不自然なくらい途切
-れていたんです。[whispers]エレベーターの表示は五
-階で止まったまま、誰も降りてこない。手机屏幕亮了
-一下,又黑了,像是在提醒什么,可消息栏里什么都没
-有。[anxiety]私は気のせいだと思って、鍵を開けよう
-としました。でもその瞬間、ドアの向こう側から、ほ
-んのわずかに、何かが擦れる音がしたんです。Nota
-knock, not a voice, just a slow, careful sound, as if
-someone inside was trying very hard not to be
-noticed。[panicked]心臓が一気に速くなって、指先
-が冷たくなるのがわかりました。这里明明是我一个人
-住的房间,可为什么,为什么会有人在里面?
-[trembling]呼吸を浅くしながら、私はもう一度、耳を
-澄ませました。すると今度は、確かに聞こえたんで
-す。[whispers]笑い声でした。低くて、短くて、楽し
-んでいるようには聞こえない笑い声。And then my
-phone lit up again. This time there was a message.
-[gasp] "Don't open the door."差出人は、私自身の番
-号でした。
+緊張感のある thriller風で、静かな導入から徐々にpanic を高め、英語と中国語を断片的に差し込みながら、場面描写を鮮明にする
+:[serious]最初に違和感があったのは、音でした。いつもなら深夜でも遠くで聞こえる車の気配が、その夜だけは不自然なくらい途切れていたんです。
+[whispers]エレベーターの表示は五階で止まったまま、誰も降りてこない。
+手机屏幕亮了一下,又黑了,像是在提醒什么,可消息栏里什么都没有。
+[anxiety]私は気のせいだと思って、鍵を開けようとしました。でもその瞬間、ドアの向こう側から、ほんのわずかに、何かが擦れる音がしたんです。
+Nota
+knock, not a voice, just a slow, careful sound, as if someone inside was trying very hard not to be noticed。
+[panicked]心臓が一気に速くなって、指先が冷たくなるのがわかりました。
+这里明明是我一个人 住的房间,可为什么,为什么会有人在里面?
+[trembling]呼吸を浅くしながら、私はもう一度、耳を澄ませました。すると今度は、確かに聞こえたんです。
+[whispers]笑い声でした。低くて、短くて、楽しんでいるようには聞こえない笑い声。
+And then my phone lit up again. This time there was a message.
+[gasp] "Don't open the door."差出人は、私自身の番号でした。

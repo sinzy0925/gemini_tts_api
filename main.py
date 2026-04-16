@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import html
 import io
+import logging
 import os
 import re
 import sys
@@ -22,6 +23,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
 BASE_DIR = Path(__file__).resolve().parent
 PROMPT_FILE = BASE_DIR / "prompt.txt"
@@ -29,7 +31,31 @@ MODEL_ID = "gemini-3.1-flash-tts-preview"
 DEFAULT_VOICE = "Kore"
 # プレビュー API が FinishReason.OTHER で音声パートなしを返すことがあるため再試行する
 _TTS_MAX_ATTEMPTS = 5
-_TTS_RETRY_BASE_SEC = 1.5
+
+
+def _retry_delay_sec() -> float:
+    """音声取り出し失敗・429 時の待ち秒数。環境変数 TTS_RETRY_DELAY_SEC（既定 61）。"""
+    return float(os.getenv("TTS_RETRY_DELAY_SEC", "61"))
+
+LOG = logging.getLogger(__name__)
+
+
+def setup_logging(verbose: int, *, quiet: bool) -> None:
+    """CLI / uvicorn 起動前に一度だけ呼ぶ。"""
+    if quiet:
+        level = logging.WARNING
+    elif verbose >= 1:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def _load_api_key() -> str:
@@ -83,6 +109,30 @@ def _collect_pcm_from_response(
     return b"".join(chunks), sample_rate or 24_000
 
 
+def _log_response_summary(resp: types.GenerateContentResponse, elapsed_s: float) -> None:
+    LOG.info("API 完了 (%.2f 秒)", elapsed_s)
+    if not resp.candidates:
+        LOG.warning("応答に candidates がありません")
+        return
+    c0 = resp.candidates[0]
+    fr = getattr(c0, "finish_reason", None)
+    LOG.info("finish_reason=%s", fr)
+    parts = c0.content.parts if c0.content and c0.content.parts else []
+    LOG.info("parts 数=%d", len(parts))
+    for i, p in enumerate(parts):
+        has_txt = bool(p.text)
+        inl = p.inline_data
+        nbytes = len(inl.data) if inl and inl.data else 0
+        mime = inl.mime_type if inl else None
+        LOG.debug(
+            "  part[%d] text=%s inline_bytes=%d mime=%s",
+            i,
+            has_txt,
+            nbytes,
+            mime,
+        )
+
+
 def pcm_to_wav_bytes(pcm: bytes, sample_rate: int, channels: int = 1, sample_width: int = 2) -> bytes:
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
@@ -94,8 +144,16 @@ def pcm_to_wav_bytes(pcm: bytes, sample_rate: int, channels: int = 1, sample_wid
 
 
 def synthesize_to_wav_bytes() -> bytes:
+    t_all = time.perf_counter()
     prompt = read_prompt_text()
     voice = os.getenv("VOICE_NAME", DEFAULT_VOICE).strip() or DEFAULT_VOICE
+
+    LOG.info(
+        "TTS 開始 model=%s voice=%s prompt 文字数=%d",
+        MODEL_ID,
+        voice,
+        len(prompt),
+    )
 
     cfg = types.GenerateContentConfig(
         response_modalities=["AUDIO"],
@@ -110,20 +168,53 @@ def synthesize_to_wav_bytes() -> bytes:
     client = genai.Client(api_key=_load_api_key())
     last_err: Exception | None = None
     for attempt in range(_TTS_MAX_ATTEMPTS):
-        resp = client.models.generate_content(
-            model=MODEL_ID,
-            contents=prompt,
-            config=cfg,
+        LOG.info(
+            "API リクエスト送信中 (%d / %d 回目) …",
+            attempt + 1,
+            _TTS_MAX_ATTEMPTS,
         )
+        t_req = time.perf_counter()
+        try:
+            resp = client.models.generate_content(
+                model=MODEL_ID,
+                contents=prompt,
+                config=cfg,
+            )
+        except APIError as e:
+            if e.code == 429 and attempt + 1 < _TTS_MAX_ATTEMPTS:
+                LOG.warning("429 RESOURCE_EXHAUSTED: %s", e.message or e)
+                delay = _retry_delay_sec()
+                LOG.info("%.0f 秒待ってから再試行します", delay)
+                time.sleep(delay)
+                continue
+            raise
+        elapsed_req = time.perf_counter() - t_req
+        _log_response_summary(resp, elapsed_req)
+
         try:
             pcm, rate = _collect_pcm_from_response(resp)
-            return pcm_to_wav_bytes(pcm, rate)
         except RuntimeError as e:
             last_err = e
+            LOG.warning("音声データの取り出しに失敗: %s", e)
             if attempt + 1 >= _TTS_MAX_ATTEMPTS:
+                LOG.error("リトライ上限に達しました")
                 raise
-            delay = _TTS_RETRY_BASE_SEC * (attempt + 1)
+            delay = _retry_delay_sec()
+            LOG.info("%.0f 秒待ってから再試行します", delay)
             time.sleep(delay)
+            continue
+
+        wav = pcm_to_wav_bytes(pcm, rate)
+        total = time.perf_counter() - t_all
+        LOG.info(
+            "TTS 成功 PCM=%d bytes sample_rate=%d Hz → WAV=%d bytes (合計 %.2f 秒)",
+            len(pcm),
+            rate,
+            len(wav),
+            total,
+        )
+        return wav
+
     assert last_err is not None
     raise last_err
 
@@ -134,6 +225,7 @@ def run_cli(output: Path | None) -> None:
     wav = synthesize_to_wav_bytes()
     out = output or (BASE_DIR / f"gemini_tts_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.wav")
     out.write_bytes(wav)
+    LOG.info("保存先: %s (%d bytes)", out.resolve(), len(wav))
     print(f"保存しました: {out}")
 
 
@@ -168,6 +260,7 @@ def index() -> str:
 
 @app.get("/download.wav")
 def download_wav() -> Response:
+    LOG.info("HTTP: 音声ダウンロード要求を受信")
     try:
         data = synthesize_to_wav_bytes()
     except Exception as e:
@@ -184,6 +277,19 @@ def download_wav() -> Response:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Gemini TTS: prompt.txt を音声化")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="詳細ログ（-v で DEBUG。パート単位など）",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="警告以上だけ表示",
+    )
     parser.add_argument(
         "--web",
         action="store_true",
@@ -213,14 +319,21 @@ def main() -> None:
         import uvicorn
 
         load_dotenv(BASE_DIR / ".env")
+        setup_logging(args.verbose, quiet=args.quiet)
+        uv_log = "debug" if args.verbose >= 1 else "info"
+        if args.quiet:
+            uv_log = "warning"
+        LOG.info("Web サーバ起動 host=%s port=%s", args.host, args.port)
         uvicorn.run(
             "main:app",
             host=args.host,
             port=args.port,
             reload=False,
+            log_level=uv_log,
         )
         return
 
+    setup_logging(args.verbose, quiet=args.quiet)
     try:
         run_cli(args.output)
     except Exception as e:
